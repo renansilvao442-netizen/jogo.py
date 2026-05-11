@@ -12,6 +12,7 @@ tela = pygame.display.set_mode((LARGURA, ALTURA))
 pygame.display.set_caption("Venn Runner")
 relogio = pygame.time.Clock()
 
+# ── sons sintetizados ──────────────────────────────────────────────
 def gerar_som(freq, duracao, vol=0.3, tipo="sine"):
     sr  = 44100
     n   = int(sr * duracao)
@@ -32,12 +33,12 @@ def gerar_som(freq, duracao, vol=0.3, tipo="sine"):
     return pygame.mixer.Sound(buffer=bytes(buf))
 
 try:
-    SOM_MOEDA  = gerar_som(880,  0.12, 0.35)
-    SOM_ERRO   = gerar_som(200,  0.25, 0.30)
-    SOM_DANO   = gerar_som(150,  0.30, 0.40, "square")
-    SOM_PULO   = gerar_som(440,  0.10, 0.20)
-    SOM_FASE   = gerar_som(660,  0.35, 0.35)
-    SOM_GAME   = gerar_som(120,  0.50, 0.40, "square")
+    SOM_MOEDA  = gerar_som(880,  0.12, 0.35)        # pega moeda certa
+    SOM_ERRO   = gerar_som(200,  0.25, 0.30)         # moeda errada
+    SOM_DANO   = gerar_som(150,  0.30, 0.40, "square") # toca no obstáculo
+    SOM_PULO   = gerar_som(440,  0.10, 0.20)         # pulo
+    SOM_FASE   = gerar_som(660,  0.35, 0.35)         # passa de fase
+    SOM_GAME   = gerar_som(120,  0.50, 0.40, "square") # game over
     SONS_OK    = True
 except Exception:
     SONS_OK    = False
@@ -46,6 +47,7 @@ def tocar(som):
     if SONS_OK:
         som.play()
 
+# cores
 PRETO   = (0, 0, 0)
 BRANCO  = (255, 255, 255)
 CINZA   = (50, 50, 75)
@@ -66,6 +68,7 @@ fonte_mini    = pygame.font.SysFont("Arial", 14)
 
 CHAO_Y = ALTURA - 70
 
+# fases: nome, velocidade, zona que o jogador deve coletar
 FASES = [
     ["FACIL",    3, "uniao"],
     ["MEDIO",    4, "intersecao"],
@@ -75,33 +78,43 @@ FASES = [
 PONTOS_PARA_PASSAR = 10
 
 
+# ─────────────────────────────────────────────────────────────────
+# funcoes de desenho do personagem
+# ─────────────────────────────────────────────────────────────────
 def desenhar_personagem(cx, cy, frame, no_chao, invinc, piscar):
+    # se estiver invencivel pisca
     if invinc > 0 and piscar < 3:
         return
 
+    # sombra no chao
     pygame.draw.ellipse(tela, (10, 10, 25), (cx - 15, cy + 2, 30, 8))
 
+    # animacao das pernas
     if no_chao:
         a1 = int(math.sin(frame / 24 * 2 * math.pi) * 9)
     else:
         a1 = 0
     a2 = -a1
 
+    # perna esquerda
     joelho_e = (cx - 6 + a1, cy - 8)
     pe_e     = (cx - 6 + a1 * 2, cy)
     pygame.draw.line(tela, (30, 30, 80), (cx - 6, cy - 16), joelho_e, 6)
     pygame.draw.line(tela, (30, 30, 80), joelho_e, pe_e, 6)
     pygame.draw.ellipse(tela, (20, 15, 10), (pe_e[0] - 7, pe_e[1] - 3, 14, 7))
 
+    # perna direita
     joelho_d = (cx + 6 + a2, cy - 8)
     pe_d     = (cx + 6 + a2 * 2, cy)
     pygame.draw.line(tela, (30, 30, 80), (cx + 6, cy - 16), joelho_d, 6)
     pygame.draw.line(tela, (30, 30, 80), joelho_d, pe_d, 6)
     pygame.draw.ellipse(tela, (20, 15, 10), (pe_d[0] - 7, pe_d[1] - 3, 14, 7))
 
+    # corpo
     pygame.draw.rect(tela, (50, 110, 210), (cx - 11, cy - 40, 22, 22), border_radius=4)
     pygame.draw.rect(tela, BRANCO, (cx - 4, cy - 40, 8, 5))
 
+    # bracos
     if no_chao:
         b1 = int(math.sin(frame / 24 * 2 * math.pi) * 7)
         pygame.draw.line(tela, (50, 110, 210), (cx - 11, cy - 35), (cx - 19, cy - 25 + b1), 5)
@@ -110,19 +123,26 @@ def desenhar_personagem(cx, cy, frame, no_chao, invinc, piscar):
         pygame.draw.line(tela, (230, 185, 130), (cx - 11, cy - 35), (cx - 20, cy - 45), 5)
         pygame.draw.line(tela, (230, 185, 130), (cx + 11, cy - 35), (cx + 20, cy - 45), 5)
 
+    # pescoco
     pygame.draw.rect(tela, (230, 185, 130), (cx - 3, cy - 44, 6, 6))
 
+    # cabeca
     pygame.draw.ellipse(tela, (230, 185, 130), (cx - 12, cy - 62, 24, 20))
     pygame.draw.ellipse(tela, (55, 30, 8),     (cx - 12, cy - 64, 24, 13))
 
+    # olho e boca
     pygame.draw.circle(tela, PRETO,  (cx + 5, cy - 54), 3)
     pygame.draw.circle(tela, BRANCO, (cx + 7, cy - 56), 1)
     pygame.draw.arc(tela, (150, 70, 50),
                     (cx - 4, cy - 50, 9, 5), math.pi, 2 * math.pi, 2)
 
+    # orelha
     pygame.draw.ellipse(tela, (230, 185, 130), (cx - 14, cy - 57, 4, 7))
 
 
+# ─────────────────────────────────────────────────────────────────
+# funcoes de desenho do fundo
+# ─────────────────────────────────────────────────────────────────
 estrelas = []
 for i in range(60):
     ex = random.randint(0, LARGURA)
@@ -132,6 +152,7 @@ for i in range(60):
 
 
 def desenhar_fundo(offset):
+    # gradiente do ceu roxo/azul noturno
     for y in range(CHAO_Y):
         t = y / CHAO_Y
         r = int(18 + 30 * t)
@@ -139,11 +160,13 @@ def desenhar_fundo(offset):
         b = int(50 + 60 * t)
         pygame.draw.line(tela, (r, g, b), (0, y), (LARGURA, y))
 
+    # estrelas com brilho variado
     for estrela in estrelas:
         bx = int((estrela[0] - offset * 0.03) % LARGURA)
         brilho = 160 + estrela[2] * 25
         pygame.draw.circle(tela, (brilho, brilho, 255), (bx, estrela[1]), estrela[2])
 
+    # montanhas de fundo com paralaxe
     pontos_mont = []
     for i in range(0, LARGURA + 120, 80):
         bx = int((i - offset * 0.08) % (LARGURA + 200))
@@ -154,15 +177,20 @@ def desenhar_fundo(offset):
     if len(pontos_mont) > 2:
         pygame.draw.polygon(tela, (30, 22, 65), pontos_mont)
 
+    # chao com grama estilo Mario
     pygame.draw.rect(tela, (35, 120, 45), (0, CHAO_Y,      LARGURA, 8))
     pygame.draw.rect(tela, (55,  80, 35), (0, CHAO_Y + 8,  LARGURA, 20))
     pygame.draw.rect(tela, (45,  60, 28), (0, CHAO_Y + 28, LARGURA, ALTURA - CHAO_Y))
 
+    # tijolos no chao animados
     for i in range(0, LARGURA + 54, 54):
         bx = int((i - offset * 0.5) % (LARGURA + 54))
         pygame.draw.rect(tela, (65, 95, 40), (bx, CHAO_Y + 9, 52, 19), 1)
 
 
+# ─────────────────────────────────────────────────────────────────
+# funcoes do diagrama de venn
+# ─────────────────────────────────────────────────────────────────
 def ponto_dentro_circulo(px, py, cx, cy, raio):
     distancia = math.sqrt((px - cx) ** 2 + (py - cy) ** 2)
     if distancia <= raio:
@@ -196,6 +224,7 @@ def numero_correto(numero, conj_a, conj_b, zona_alvo):
         else:
             return False
     if zona_alvo == "diferenca":
+        # so elementos que estao em A mas nao em B
         if numero in conj_a and numero not in conj_b:
             return True
         else:
@@ -213,18 +242,18 @@ def topo_circulo_em_x(px, cx, cy, raio):
 
 
 def criar_obstaculo(x, zona_alvo):
-    raio = random.randint(32, 44)
-    dist = int(raio * 1.2)
+    raio = random.randint(55, 70)
+    dist = int(raio * 1.3)
     cx   = float(x)
     cx_a = cx - dist // 2
     cx_b = cx + dist // 2
-    cy   = CHAO_Y - raio + 12
+    cy   = CHAO_Y - raio
 
     conj_a = set(random.sample(range(1, 11), random.randint(3, 5)))
     conj_b = set(random.sample(range(6, 16), random.randint(3, 5)))
 
-    todos   = list(conj_a | conj_b)
-    extras  = [n for n in range(1, 16) if n not in (conj_a | conj_b)]
+    todos    = list(conj_a | conj_b)
+    extras   = [n for n in range(1, 16) if n not in (conj_a | conj_b)]
     corretos = [n for n in todos if numero_correto(n, conj_a, conj_b, zona_alvo)]
     errados  = [n for n in todos if not numero_correto(n, conj_a, conj_b, zona_alvo)]
     if extras:
@@ -233,38 +262,39 @@ def criar_obstaculo(x, zona_alvo):
     random.shuffle(corretos)
     random.shuffle(errados)
 
-    moedas  = []
-    start_x = cx_b + raio + 70
+    moedas   = []
+    start_x  = cx_b + raio + 130
+    altura_chao = CHAO_Y - 48
 
-    altura_dourada = CHAO_Y - 55
+    corretos = corretos[:2]
+    errados  = errados[:2]
 
-    alturas_vermelhas = [CHAO_Y - 160, CHAO_Y - 190, CHAO_Y - 220]
+    while len(corretos) < 2:
+        corretos.append(corretos[0] if corretos else 1)
+    while len(errados) < 2:
+        errados.append(errados[0] if errados else 9)
 
-    todas_em_ordem = []
-    for i, n in enumerate(corretos[:3]):
-        todas_em_ordem.append((n, True,  float(start_x + i * 90), altura_dourada))
-    for i, n in enumerate((errados[:3])):
-        ax = start_x + i * 90 + 45
-        ay = float(random.choice(alturas_vermelhas))
-        todas_em_ordem.append((n, False, float(ax), ay))
+    sequencia = [
+        (corretos[0], True),
+        (errados[0],  False),
+        (corretos[1], True),
+        (errados[1],  False),
+    ]
 
-    for (n, ok, px, py) in todas_em_ordem:
+    for i, (n, ok) in enumerate(sequencia):
         moedas.append({
-            "x"       : px,
-            "y"       : py,
+            "x"       : float(start_x + i * 80),
+            "y"       : float(altura_chao),
             "valor"   : n,
             "correto" : ok,
             "coletado": False,
-            "flutua"  : random.uniform(0, 6.28),
+            "flutua"  : 0.0,
         })
 
     ob = {
         "cx": cx, "cx_a": cx_a, "cx_b": cx_b, "cy": cy,
-        "raio"   : raio,
-        "conj_a" : conj_a,
-        "conj_b" : conj_b,
-        "zona_alvo": zona_alvo,
-        "moedas" : moedas,
+        "raio": raio, "conj_a": conj_a, "conj_b": conj_b,
+        "zona_alvo": zona_alvo, "moedas": moedas,
     }
     return ob
 
@@ -274,8 +304,7 @@ def mover_obstaculo(ob, vel):
     ob["cx_a"] -= vel
     ob["cx_b"] -= vel
     for m in ob["moedas"]:
-        m["x"]      -= vel
-        m["flutua"] += 0.07
+        m["x"] -= vel
 
 
 def obstaculo_fora(ob):
@@ -293,57 +322,60 @@ def desenhar_obstaculo(ob):
     cx    = int(ob["cx"])
     zona_alvo = ob.get("zona_alvo", "")
 
-    s_sombra = pygame.Surface((LARGURA, ALTURA), pygame.SRCALPHA)
-    pygame.draw.ellipse(s_sombra, (0, 0, 0, 50),
-                        (cx_a - raio, cy + raio - 8, raio * 2, 14))
-    pygame.draw.ellipse(s_sombra, (0, 0, 0, 50),
-                        (cx_b - raio, cy + raio - 8, raio * 2, 14))
-    tela.blit(s_sombra, (0, 0))
+    if zona_alvo == "uniao":
+        formula  = "A U B"
+        cor_form = (120, 210, 255)
+        cor_a    = (60, 130, 255, 120)
+        cor_b    = (60, 200, 255, 100)
+        borda_a  = (100, 170, 255)
+        borda_b  = (60,  200, 255)
+    elif zona_alvo == "intersecao":
+        formula  = "A ∩ B"
+        cor_form = (220, 150, 255)
+        cor_a    = (160, 60, 255, 110)
+        cor_b    = (200, 80, 255, 100)
+        borda_a  = (190, 100, 255)
+        borda_b  = (220, 130, 255)
+    else:
+        formula  = "A - B"
+        cor_form = (255, 200, 60)
+        cor_a    = (255, 160, 30, 110)
+        cor_b    = (255, 120, 30, 90)
+        borda_a  = (255, 190, 50)
+        borda_b  = (255, 140, 40)
 
     s = pygame.Surface((LARGURA, ALTURA), pygame.SRCALPHA)
-    pygame.draw.circle(s, (180, 30,  30,  80), (cx_a, cy), raio)
-    pygame.draw.circle(s, (120, 20, 180,  80), (cx_b, cy), raio)
-    pygame.draw.circle(s, (255, 60,  60,  30), (cx_a - raio//4, cy - raio//4), raio//2)
-    pygame.draw.circle(s, (180, 60, 255,  30), (cx_b - raio//4, cy - raio//4), raio//2)
+    pygame.draw.circle(s, cor_a, (cx_a, cy), raio)
+    pygame.draw.circle(s, cor_b, (cx_b, cy), raio)
+    pygame.draw.circle(s, (*cor_form, 25), (cx_a - raio//4, cy - raio//4), raio//2)
+    pygame.draw.circle(s, (*cor_form, 20), (cx_b - raio//4, cy - raio//4), raio//2)
     tela.blit(s, (0, 0))
 
-    pygame.draw.circle(tela, (255, 80,  80),  (cx_a, cy), raio,     3)
-    pygame.draw.circle(tela, (200, 40,  40),  (cx_a, cy), raio - 2, 1)
-    pygame.draw.circle(tela, (200, 80, 255),  (cx_b, cy), raio,     3)
-    pygame.draw.circle(tela, (150, 40, 200),  (cx_b, cy), raio - 2, 1)
+    pygame.draw.circle(tela, borda_a, (cx_a, cy), raio,     4)
+    pygame.draw.circle(tela, borda_b, (cx_b, cy), raio,     4)
+    pygame.draw.circle(tela, BRANCO,  (cx_a, cy), raio - 5, 1)
+    pygame.draw.circle(tela, BRANCO,  (cx_b, cy), raio - 5, 1)
 
-    la = fonte_media.render("A", True, (255, 130, 130))
-    lb = fonte_media.render("B", True, (210, 150, 255))
-    tela.blit(la, (cx_a - la.get_width() // 2, cy - la.get_height() // 2))
-    tela.blit(lb, (cx_b - lb.get_width() // 2, cy - lb.get_height() // 2))
+    la = fonte_media.render("A", True, borda_a)
+    lb = fonte_media.render("B", True, borda_b)
+    tela.blit(la, (cx_a - raio + 8,                   cy - raio + 6))
+    tela.blit(lb, (cx_b + raio - lb.get_width() - 8,  cy - raio + 6))
 
-    if zona_alvo == "uniao":
-        formula  = "Colete:  A ∪ B"
-        cor_form = (120, 210, 255)
-    elif zona_alvo == "intersecao":
-        formula  = "Colete:  A ∩ B"
-        cor_form = (200, 140, 255)
-    else:
-        formula  = "Colete:  A − B"
-        cor_form = (255, 185, 60)
+    conj_a_sorted = sorted(ob["conj_a"])
+    conj_b_sorted = sorted(ob["conj_b"])
+    ta1 = fonte_mini.render(str(conj_a_sorted[:3]), True, BRANCO)
+    ta2 = fonte_mini.render(str(conj_a_sorted[3:]) if len(conj_a_sorted) > 3 else "", True, BRANCO)
+    tb1 = fonte_mini.render(str(conj_b_sorted[:3]), True, BRANCO)
+    tb2 = fonte_mini.render(str(conj_b_sorted[3:]) if len(conj_b_sorted) > 3 else "", True, BRANCO)
+    tela.blit(ta1, (cx_a - ta1.get_width() // 2, cy + 6))
+    if ta2.get_width() > 4:
+        tela.blit(ta2, (cx_a - ta2.get_width() // 2, cy + 22))
+    tela.blit(tb1, (cx_b - tb1.get_width() // 2, cy + 6))
+    if tb2.get_width() > 4:
+        tela.blit(tb2, (cx_b - tb2.get_width() // 2, cy + 22))
 
-    tf  = fonte_media.render(formula, True, cor_form)
-    fy  = cy + raio + 6
-    fx  = cx - tf.get_width() // 2
-    pad = 8
-    pygame.draw.rect(tela, (8, 8, 25),
-                     (fx - pad, fy - 2, tf.get_width() + pad * 2, tf.get_height() + 4),
-                     border_radius=6)
-    pygame.draw.rect(tela, cor_form,
-                     (fx - pad, fy - 2, tf.get_width() + pad * 2, tf.get_height() + 4),
-                     2, border_radius=6)
-    tela.blit(tf, (fx, fy))
-
-    ta = fonte_mini.render("A = " + str(sorted(ob["conj_a"])), True, (255, 160, 160))
-    tela.blit(ta, (cx - ta.get_width() // 2, fy + tf.get_height() + 6))
-
-    tb = fonte_mini.render("B = " + str(sorted(ob["conj_b"])), True, (210, 170, 255))
-    tela.blit(tb, (cx - tb.get_width() // 2, fy + tf.get_height() + 6 + ta.get_height() + 2))
+    tf = fonte_media.render(formula, True, cor_form)
+    tela.blit(tf, (cx - tf.get_width() // 2, cy - raio + 28))
 
 
 def desenhar_moeda(m):
@@ -353,7 +385,7 @@ def desenhar_moeda(m):
     ey = int(m["y"])
     r  = 22
 
-    ey_draw = ey + int(math.sin(m["flutua"]) * 7)
+    ey_draw = ey
 
     s = pygame.Surface((r*2+10, 10), pygame.SRCALPHA)
     pygame.draw.ellipse(s, (0, 0, 0, 60), (0, 0, r*2+10, 10))
@@ -368,12 +400,15 @@ def desenhar_moeda(m):
     tela.blit(txt, (ex - txt.get_width() // 2, ey_draw - txt.get_height() // 2))
 
 
+
 def desenhar_hud(vidas, pontos_fase, nome_fase, zona_alvo, pontos_total=0):
+    # painel superior semitransparente
     painel = pygame.Surface((LARGURA, 52), pygame.SRCALPHA)
     pygame.draw.rect(painel, (8, 8, 25, 200), (0, 0, LARGURA, 52), border_radius=0)
     tela.blit(painel, (0, 0))
     pygame.draw.line(tela, (80, 80, 160), (0, 51), (LARGURA, 51), 2)
 
+    # coracoes de vida
     for i in range(5):
         cor = (220, 50, 80) if i < vidas else (55, 40, 55)
         hx = 14 + i * 30
@@ -389,15 +424,26 @@ def desenhar_hud(vidas, pontos_fase, nome_fase, zona_alvo, pontos_total=0):
                 (hx+9, hy+4), (hx+4, hy), (hx+9, hy+12)
             ])
 
+    # pontos — centro do HUD
     tp = fonte_media.render("⭐ " + str(pontos_total), True, AMARELO)
     tela.blit(tp, (LARGURA // 2 - tp.get_width() // 2, 12))
 
+    # progresso — lado direito
     tf = fonte_mini.render("Fase: " + nome_fase, True, (160, 220, 160))
     tela.blit(tf, (LARGURA - tf.get_width() - 10, 6))
 
     prog_txt = fonte_mini.render("Progresso: " + str(pontos_fase) + "/" + str(PONTOS_PARA_PASSAR), True, BRANCO)
     tela.blit(prog_txt, (LARGURA - prog_txt.get_width() - 10, 22))
 
+    tp2 = fonte_mini.render("P: PAUSAR", True, (180, 180, 220))
+    tela.blit(tp2, (10, 36))
+
+    pygame.draw.rect(tela, (40, 40, 90), (LARGURA - 90, 8, 80, 34), border_radius=8)
+    pygame.draw.rect(tela, (120, 120, 200), (LARGURA - 90, 8, 80, 34), 2, border_radius=8)
+    sp = fonte_media.render("II", True, BRANCO)
+    tela.blit(sp, (LARGURA - 90 + 40 - sp.get_width()//2, 14))
+
+    # barra de progresso
     bx = LARGURA - 160
     by = 38
     bw = 150
@@ -408,14 +454,19 @@ def desenhar_hud(vidas, pontos_fase, nome_fase, zona_alvo, pontos_total=0):
     pygame.draw.rect(tela, (120, 255, 140), (bx, by, bw, bh), 1, border_radius=4)
 
 
+# ─────────────────────────────────────────────────────────────────
+# telas de menu, game over e passou de fase
+# ─────────────────────────────────────────────────────────────────
 def tela_menu():
     t = 0
+    # estrelas do menu
     estrelas_menu = [(random.randint(0, LARGURA), random.randint(0, ALTURA),
                       random.randint(1, 2)) for _ in range(120)]
 
     while True:
         t += 1
 
+        # fundo gradiente noturno
         for y in range(ALTURA):
             frac = y / ALTURA
             r = int(8  + 18 * frac)
@@ -423,16 +474,19 @@ def tela_menu():
             b = int(28 + 40 * frac)
             pygame.draw.line(tela, (r, g, b), (0, y), (LARGURA, y))
 
+        # estrelas piscando
         for (sx, sy, sr) in estrelas_menu:
             brilho = 120 + int(80 * abs(math.sin(t * 0.02 + sx)))
             pygame.draw.circle(tela, (brilho, brilho, 255), (sx, sy), sr)
 
+        # chao decorativo
         pygame.draw.rect(tela, (30, 100, 38), (0, ALTURA - 55, LARGURA, 8))
         pygame.draw.rect(tela, (45,  65, 28), (0, ALTURA - 47, LARGURA, 47))
         for i in range(0, LARGURA, 54):
             bx = (i + t * 2) % (LARGURA + 54)
             pygame.draw.rect(tela, (55, 80, 35), (bx, ALTURA - 46, 52, 18), 1)
 
+        # moedas decorativas animadas no chao
         for i in range(5):
             mx = 80 + i * 150
             my = ALTURA - 90
@@ -445,11 +499,13 @@ def tela_menu():
             num = fonte_mini.render(str(i + 3), True, (80, 45, 0))
             tela.blit(num, (mx - num.get_width() // 2, int(my + flut) - num.get_height() // 2))
 
+        # painel central semi-transparente
         painel = pygame.Surface((580, 330), pygame.SRCALPHA)
         pygame.draw.rect(painel, (10, 10, 35, 200), (0, 0, 580, 330), border_radius=20)
         pygame.draw.rect(painel, (80, 80, 200, 120), (0, 0, 580, 330), 2, border_radius=20)
         tela.blit(painel, (LARGURA // 2 - 290, 30))
 
+        # título com brilho pulsante
         pulso = 0.85 + 0.15 * abs(math.sin(t * 0.04))
         cor_t = (int(255 * pulso), int(210 * pulso), int(30 * pulso))
         titulo1 = fonte_grande.render("VENN", True, cor_t)
@@ -464,6 +520,7 @@ def tela_menu():
 
         pygame.draw.line(tela, (80, 80, 200), (cx - 220, 145), (cx + 220, 145), 2)
 
+        # instruções em cartões
         cards = [
             ("⬆  PULAR",     "Espaço, seta cima ou W", (60, 120, 220)),
             ("🪙  COLETAR",   "Pule nas moedas douradas", (200, 160, 0)),
@@ -479,6 +536,7 @@ def tela_menu():
             tela.blit(si, (bx + 83 - si.get_width() // 2, by + 10))
             tela.blit(sd, (bx + 83 - sd.get_width() // 2, by + 36))
 
+        # fases
         pygame.draw.line(tela, (60, 60, 140), (cx - 220, 232), (cx + 220, 232), 1)
         fases_info = [
             ("FÁCIL",   "A ∪ B",  (100, 200, 255)),
@@ -496,6 +554,7 @@ def tela_menu():
             tela.blit(sn, (bx + 70 - sn.get_width() // 2, 266))
             tela.blit(sf, (bx + 70 - sf.get_width() // 2, 283))
 
+        # botão pulsante
         pulso2 = abs(math.sin(t * 0.05))
         cor_btn = (int(40 + 20 * pulso2), int(160 + 40 * pulso2), int(60 + 20 * pulso2))
         pygame.draw.rect(tela, (20, 80, 30), (cx - 130, 320, 260, 48), border_radius=14)
@@ -591,11 +650,14 @@ def tela_game_over(pontos):
                     return True
 
 
+
+
 def jogar(indice_fase, pontos_antes):
     nome_fase  = FASES[indice_fase][0]
     velocidade = FASES[indice_fase][1]
     zona_alvo  = FASES[indice_fase][2]
 
+    # estado do jogador
     jog_x       = 150.0
     jog_y       = float(CHAO_Y)
     jog_vy      = 0.0
@@ -610,13 +672,17 @@ def jogar(indice_fase, pontos_antes):
     pontos_fase = 0
 
     obstaculos   = []
-    moedas_livres = []
+    moedas_livres = []   # moedas que sobraram de obstáculos que já saíram da tela
     offset       = 0.0
     proximo_x    = LARGURA + 250
     parts        = []
 
+    pausado     = False
+
     while True:
         relogio.tick(60)
+
+        RECT_PAUSE = pygame.Rect(LARGURA - 90, 8, 80, 34)
 
         for ev in pygame.event.get():
             if ev.type == pygame.QUIT:
@@ -625,13 +691,41 @@ def jogar(indice_fase, pontos_antes):
             if ev.type == pygame.KEYDOWN:
                 if ev.key == pygame.K_ESCAPE:
                     return pontos, None
-                if ev.key in (pygame.K_SPACE, pygame.K_UP, pygame.K_w):
-                    if jog_no_chao or jog_no_obst:
-                        jog_vy      = -15
-                        jog_no_chao = False
-                        jog_no_obst = False
-                        tocar(SOM_PULO)
+                if ev.key == pygame.K_p:
+                    pausado = not pausado
+                if not pausado:
+                    if ev.key in (pygame.K_SPACE, pygame.K_UP, pygame.K_w):
+                        if jog_no_chao or jog_no_obst:
+                            jog_vy      = -15
+                            jog_no_chao = False
+                            jog_no_obst = False
+                            tocar(SOM_PULO)
+            if ev.type == pygame.MOUSEBUTTONDOWN:
+                mx, my = pygame.mouse.get_pos()
+                if RECT_PAUSE.collidepoint(mx, my):
+                    pausado = not pausado
+                if pausado:
+                    RECT_CONT = pygame.Rect(LARGURA//2 - 110, ALTURA//2 + 50, 220, 48)
+                    if RECT_CONT.collidepoint(mx, my):
+                        pausado = False
 
+        if pausado:
+            painel_p = pygame.Surface((LARGURA, ALTURA), pygame.SRCALPHA)
+            pygame.draw.rect(painel_p, (0, 0, 0, 150), (0, 0, LARGURA, ALTURA))
+            tela.blit(painel_p, (0, 0))
+            tp1 = fonte_grande.render("II  PAUSADO", True, AMARELO)
+            tela.blit(tp1, (LARGURA//2 - tp1.get_width()//2, ALTURA//2 - 60))
+            tp2 = fonte_media.render("Pressione P ou clique abaixo", True, CINZA)
+            tela.blit(tp2, (LARGURA//2 - tp2.get_width()//2, ALTURA//2 - 10))
+            RECT_CONT = pygame.Rect(LARGURA//2 - 110, ALTURA//2 + 50, 220, 48)
+            pygame.draw.rect(tela, (40, 160, 60), RECT_CONT, border_radius=12)
+            pygame.draw.rect(tela, VERDE,         RECT_CONT, 2, border_radius=12)
+            sc = fonte_media.render("▶  CONTINUAR", True, BRANCO)
+            tela.blit(sc, (LARGURA//2 - sc.get_width()//2, RECT_CONT.y + 10))
+            pygame.display.flip()
+            continue
+
+        # fisica
         jog_vy += 0.75
         jog_y  += jog_vy
         jog_no_chao = False
@@ -651,15 +745,19 @@ def jogar(indice_fase, pontos_antes):
         offset    += velocidade
         proximo_x -= velocidade
 
+        # gera novo obstaculo
         if len(obstaculos) == 0 or obstaculos[-1]["cx"] < LARGURA + 100:
             if proximo_x < LARGURA + 200:
                 novo = criar_obstaculo(proximo_x + LARGURA, zona_alvo)
                 obstaculos.append(novo)
                 proximo_x = LARGURA + random.randint(800, 1100)
 
+        # move obstaculos (moedas vão junto dentro de cada ob)
         for ob in obstaculos:
             mover_obstaculo(ob, velocidade)
 
+        # antes de remover obstáculos fora da tela,
+        # salva as moedas não coletadas na lista independente
         for ob in obstaculos:
             if obstaculo_fora(ob):
                 for m in ob["moedas"]:
@@ -704,15 +802,6 @@ def jogar(indice_fase, pontos_antes):
             meio_y   = jog_cy - 22
             dentro_a = ponto_dentro_circulo(jog_cx, meio_y, cx_a, cy_ob, raio)
             dentro_b = ponto_dentro_circulo(jog_cx, meio_y, cx_b, cy_ob, raio)
-
-            if (dentro_a or dentro_b) and not pousando and jog_invinc == 0:
-                jog_vidas -= 1
-                jog_invinc = 70
-                tocar(SOM_DANO)
-                for k in range(18):
-                    parts.append([float(jog_cx), float(jog_cy - 20),
-                                  random.uniform(-4, 4), random.uniform(-6, -1),
-                                  random.randint(20, 36), (255, 80, 80)])
 
             for m in ob["moedas"]:
                 if m["coletado"]:
