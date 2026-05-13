@@ -4,7 +4,9 @@ import random
 import sys
 
 pygame.init()
-pygame.mixer.init(frequency=44100, size=-16, channels=1, buffer=512)
+pygame.mixer.pre_init(44100, -16, 2, 2048)
+pygame.mixer.init()
+pygame.mixer.set_num_channels(8)
 
 LARGURA = 800
 ALTURA  = 500
@@ -12,39 +14,90 @@ tela = pygame.display.set_mode((LARGURA, ALTURA))
 pygame.display.set_caption("Venn Runner")
 relogio = pygame.time.Clock()
 
-def gerar_som(freq, duracao, vol=0.3, tipo="sine"):
-    sr  = 44100
+def gerar_onda(sr, duracao, freq, vol=0.4, tipo="sine", fade_ms=30):
     n   = int(sr * duracao)
-    buf = bytearray(n * 2)
+    buf = bytearray(n * 4)
+    fd  = int(sr * fade_ms / 1000)
     for i in range(n):
-        t    = i / sr
-        fade = min(1.0, (n - i) / (sr * 0.04))
+        t  = i / sr
+        ff = min(1.0, min(i, n - i) / max(fd, 1))
         if tipo == "sine":
             v = math.sin(2 * math.pi * freq * t)
         elif tipo == "square":
             v = 1.0 if math.sin(2 * math.pi * freq * t) >= 0 else -1.0
+        elif tipo == "tri":
+            v = 2 * abs(2 * (t * freq - math.floor(t * freq + 0.5))) - 1
         else:
             v = math.sin(2 * math.pi * freq * t)
-        s = int(32767 * vol * fade * v)
+        s = int(32767 * vol * ff * v)
         s = max(-32768, min(32767, s))
-        buf[i * 2]     = s & 0xFF
-        buf[i * 2 + 1] = (s >> 8) & 0xFF
+        for ch in range(2):
+            buf[(i * 2 + ch) * 2]     = s & 0xFF
+            buf[(i * 2 + ch) * 2 + 1] = (s >> 8) & 0xFF
+    return pygame.mixer.Sound(buffer=bytes(buf))
+
+def gerar_musica_fundo():
+    sr  = 44100
+    bpm = 130
+    bt  = int(sr * 60 / bpm)
+    notas_mel = [
+        (330, 1), (294, 0.5), (330, 0.5), (392, 1),
+        (350, 1), (330, 0.5), (294, 0.5), (262, 2),
+        (294, 1), (330, 0.5), (294, 0.5), (350, 1),
+        (330, 1), (294, 1), (262, 2),
+    ]
+    notas_bass = [131, 147, 131, 131, 123, 131, 123, 131]
+    total_beats = sum(d for _, d in notas_mel)
+    total_n = int(total_beats * bt)
+    buf = bytearray(total_n * 4)
+    pos = 0
+    for freq, dur in notas_mel:
+        n = int(dur * bt)
+        for i in range(n):
+            t  = i / sr
+            fd = min(1.0, min(i, n - i) / max(int(sr * 0.02), 1))
+            mel  = 0.22 * fd * math.sin(2 * math.pi * freq * t)
+            mel += 0.08 * fd * math.sin(4 * math.pi * freq * t)
+            bi   = (pos + i) % len(notas_bass)
+            bf   = notas_bass[bi * len(notas_bass) // total_n] if False else notas_bass[bi % len(notas_bass)]
+            bass = 0.18 * fd * (1.0 if math.sin(2 * math.pi * bf * t) >= 0 else -1.0)
+            perc = 0.10 * fd * (math.sin(2 * math.pi * 200 * t) if (pos + i) % bt < bt // 8 else 0)
+            s = int(32767 * max(-1, min(1, mel + bass + perc)))
+            idx = (pos + i) * 4
+            if idx + 3 < len(buf):
+                for ch in range(2):
+                    buf[idx + ch*2]     = s & 0xFF
+                    buf[idx + ch*2 + 1] = (s >> 8) & 0xFF
+        pos += n
     return pygame.mixer.Sound(buffer=bytes(buf))
 
 try:
-    SOM_MOEDA  = gerar_som(880,  0.12, 0.35)
-    SOM_ERRO   = gerar_som(200,  0.25, 0.30)
-    SOM_DANO   = gerar_som(150,  0.30, 0.40, "square")
-    SOM_PULO   = gerar_som(440,  0.10, 0.20)
-    SOM_FASE   = gerar_som(660,  0.35, 0.35)
-    SOM_GAME   = gerar_som(120,  0.50, 0.40, "square")
-    SONS_OK    = True
+    pygame.mixer.set_num_channels(8)
+    SOM_MOEDA   = gerar_onda(44100, 0.18, 880, 0.30, "sine")
+    SOM_VITORIA = gerar_onda(44100, 0.70, 660, 0.40, "tri")
+    MUSICA_BG   = gerar_musica_fundo()
+    SONS_OK     = True
 except Exception:
-    SONS_OK    = False
+    SONS_OK     = False
+    SOM_MOEDA   = None
+    SOM_VITORIA = None
+    MUSICA_BG   = None
 
-def tocar(som):
-    if SONS_OK:
-        som.play()
+def tocar_moeda():
+    if SONS_OK and SOM_MOEDA:
+        SOM_MOEDA.play()
+
+def tocar_vitoria():
+    if SONS_OK and SOM_VITORIA:
+        SOM_VITORIA.play()
+
+def iniciar_musica():
+    if SONS_OK and MUSICA_BG:
+        MUSICA_BG.play(loops=-1)
+
+def parar_musica():
+    if SONS_OK and MUSICA_BG:
+        MUSICA_BG.stop()
 
 PRETO   = (0, 0, 0)
 BRANCO  = (255, 255, 255)
@@ -67,12 +120,12 @@ fonte_mini    = pygame.font.SysFont("Arial", 14)
 CHAO_Y = ALTURA - 70
 
 FASES = [
-    ["FACIL",    3, "uniao"],
-    ["MEDIO",    4, "intersecao"],
-    ["DIFICIL",  5, "diferenca"],
+    ["FACIL",    5, "uniao"],
+    ["MEDIO",    7, "intersecao"],
+    ["DIFICIL",  9, "diferenca"],
 ]
 
-PONTOS_PARA_PASSAR = 10
+PONTOS_PARA_PASSAR = 12
 
 
 def desenhar_personagem(cx, cy, frame, no_chao, invinc, piscar):
@@ -213,12 +266,12 @@ def topo_circulo_em_x(px, cx, cy, raio):
 
 
 def criar_obstaculo(x, zona_alvo):
-    raio = random.randint(55, 70)
-    dist = int(raio * 1.3)
+    raio = random.randint(75, 90)
+    dist = int(raio * 1.4)
     cx   = float(x)
     cx_a = cx - dist // 2
     cx_b = cx + dist // 2
-    cy   = CHAO_Y - raio
+    cy   = int(ALTURA * 0.28)
 
     conj_a = set(random.sample(range(1, 11), random.randint(3, 5)))
     conj_b = set(random.sample(range(6, 16), random.randint(3, 5)))
@@ -234,8 +287,8 @@ def criar_obstaculo(x, zona_alvo):
     random.shuffle(errados)
 
     moedas   = []
-    start_x  = cx_b + raio + 130
-    altura_chao = CHAO_Y - 48
+    start_x  = cx_b + raio + 100
+    altura_chao = CHAO_Y - 52
 
     corretos = corretos[:2]
     errados  = errados[:2]
@@ -254,7 +307,7 @@ def criar_obstaculo(x, zona_alvo):
 
     for i, (n, ok) in enumerate(sequencia):
         moedas.append({
-            "x"       : float(start_x + i * 130),
+            "x"       : float(start_x + i * 160),
             "y"       : float(altura_chao),
             "valor"   : n,
             "correto" : ok,
@@ -295,58 +348,73 @@ def desenhar_obstaculo(ob):
 
     if zona_alvo == "uniao":
         formula  = "A U B"
-        cor_form = (120, 210, 255)
-        cor_a    = (60, 130, 255, 120)
-        cor_b    = (60, 200, 255, 100)
-        borda_a  = (100, 170, 255)
-        borda_b  = (60,  200, 255)
+        cor_form = (120, 220, 255)
+        cor_a    = (40, 100, 255, 130)
+        cor_b    = (40, 180, 255, 110)
+        borda_a  = (120, 190, 255)
+        borda_b  = (60,  210, 255)
     elif zona_alvo == "intersecao":
         formula  = "A ∩ B"
-        cor_form = (220, 150, 255)
-        cor_a    = (160, 60, 255, 110)
-        cor_b    = (200, 80, 255, 100)
-        borda_a  = (190, 100, 255)
-        borda_b  = (220, 130, 255)
+        cor_form = (230, 160, 255)
+        cor_a    = (150, 40, 255, 120)
+        cor_b    = (200, 70, 255, 110)
+        borda_a  = (200, 110, 255)
+        borda_b  = (230, 140, 255)
     else:
         formula  = "A - B"
-        cor_form = (255, 200, 60)
-        cor_a    = (255, 160, 30, 110)
-        cor_b    = (255, 120, 30, 90)
-        borda_a  = (255, 190, 50)
-        borda_b  = (255, 140, 40)
+        cor_form = (255, 210, 60)
+        cor_a    = (255, 150, 20, 120)
+        cor_b    = (255, 100, 20, 100)
+        borda_a  = (255, 200, 50)
+        borda_b  = (255, 150, 40)
 
     s = pygame.Surface((LARGURA, ALTURA), pygame.SRCALPHA)
     pygame.draw.circle(s, cor_a, (cx_a, cy), raio)
     pygame.draw.circle(s, cor_b, (cx_b, cy), raio)
-    pygame.draw.circle(s, (*cor_form, 25), (cx_a - raio//4, cy - raio//4), raio//2)
-    pygame.draw.circle(s, (*cor_form, 20), (cx_b - raio//4, cy - raio//4), raio//2)
     tela.blit(s, (0, 0))
 
-    pygame.draw.circle(tela, borda_a, (cx_a, cy), raio,     4)
-    pygame.draw.circle(tela, borda_b, (cx_b, cy), raio,     4)
-    pygame.draw.circle(tela, BRANCO,  (cx_a, cy), raio - 5, 1)
-    pygame.draw.circle(tela, BRANCO,  (cx_b, cy), raio - 5, 1)
+    pygame.draw.circle(tela, borda_a, (cx_a, cy), raio,     5)
+    pygame.draw.circle(tela, borda_b, (cx_b, cy), raio,     5)
+    pygame.draw.circle(tela, BRANCO,  (cx_a, cy), raio,     1)
+    pygame.draw.circle(tela, BRANCO,  (cx_b, cy), raio,     1)
 
-    la = fonte_media.render("A", True, borda_a)
-    lb = fonte_media.render("B", True, borda_b)
-    tela.blit(la, (cx_a - raio + 8,                   cy - raio + 6))
-    tela.blit(lb, (cx_b + raio - lb.get_width() - 8,  cy - raio + 6))
+    fonte_AB = pygame.font.SysFont("Arial", 22, bold=True)
+    la = fonte_AB.render("A", True, borda_a)
+    lb = fonte_AB.render("B", True, borda_b)
+    tela.blit(la, (cx_a - raio + 8, cy - raio + 6))
+    tela.blit(lb, (cx_b + raio - lb.get_width() - 8, cy - raio + 6))
 
-    conj_a_sorted = sorted(ob["conj_a"])
-    conj_b_sorted = sorted(ob["conj_b"])
-    ta1 = fonte_mini.render(str(conj_a_sorted[:3]), True, BRANCO)
-    ta2 = fonte_mini.render(str(conj_a_sorted[3:]) if len(conj_a_sorted) > 3 else "", True, BRANCO)
-    tb1 = fonte_mini.render(str(conj_b_sorted[:3]), True, BRANCO)
-    tb2 = fonte_mini.render(str(conj_b_sorted[3:]) if len(conj_b_sorted) > 3 else "", True, BRANCO)
-    tela.blit(ta1, (cx_a - ta1.get_width() // 2, cy + 6))
-    if ta2.get_width() > 4:
-        tela.blit(ta2, (cx_a - ta2.get_width() // 2, cy + 22))
-    tela.blit(tb1, (cx_b - tb1.get_width() // 2, cy + 6))
-    if tb2.get_width() > 4:
-        tela.blit(tb2, (cx_b - tb2.get_width() // 2, cy + 22))
+    fonte_form = pygame.font.SysFont("Arial", 28, bold=True)
+    tf = fonte_form.render(formula, True, cor_form)
+    fx = cx - tf.get_width() // 2
+    fy = cy - raio + 10
+    sombra = fonte_form.render(formula, True, PRETO)
+    tela.blit(sombra, (fx + 2, fy + 2))
+    tela.blit(tf, (fx, fy))
 
-    tf = fonte_media.render(formula, True, cor_form)
-    tela.blit(tf, (cx - tf.get_width() // 2, cy - raio + 28))
+    fonte_num = pygame.font.SysFont("Arial", 20, bold=True)
+    conj_a_s  = sorted(ob["conj_a"])
+    conj_b_s  = sorted(ob["conj_b"])
+
+    def desenhar_lista(nums, centro_x, topo_y, cor_borda):
+        texto = " { " + ", ".join(str(n) for n in nums) + " }"
+        ts = fonte_num.render(texto, True, BRANCO)
+        tx = centro_x - ts.get_width() // 2
+        pad = 5
+        pygame.draw.rect(tela, (10, 10, 30),
+                         (tx - pad, topo_y - 2, ts.get_width() + pad*2, ts.get_height() + 4),
+                         border_radius=6)
+        pygame.draw.rect(tela, cor_borda,
+                         (tx - pad, topo_y - 2, ts.get_width() + pad*2, ts.get_height() + 4),
+                         2, border_radius=6)
+        ts_sombra = fonte_num.render(texto, True, PRETO)
+        tela.blit(ts_sombra, (tx + 1, topo_y + 1))
+        tela.blit(ts, (tx, topo_y))
+
+    desenhar_lista(conj_a_s, cx_a, cy - 12, borda_a)
+    desenhar_lista(conj_b_s, cx_b, cy - 12, borda_b)
+
+    pygame.draw.line(tela, (100, 100, 140), (cx, cy + raio), (cx, CHAO_Y), 2)
 
 
 def desenhar_moeda(m):
@@ -602,105 +670,203 @@ def tela_game_over(pontos):
                     return True
 
 
+def criar_espinho(x, tamanho="medio"):
+    if tamanho == "pequeno":
+        return {"x": float(x), "largura": 20,  "altura": 18, "tipo": "espinho", "tam": "pequeno", "qtd": 2}
+    elif tamanho == "grande":
+        return {"x": float(x), "largura": 70,  "altura": 55, "tipo": "espinho", "tam": "grande",  "qtd": 5}
+    else:
+        return {"x": float(x), "largura": 36,  "altura": 32, "tipo": "espinho", "tam": "medio",   "qtd": 3}
+
+def criar_barreira(x):
+    return {"x": float(x), "largura": 26, "altura": 72, "tipo": "barreira"}
+
+def desenhar_espinho(obj):
+    bx  = int(obj["x"])
+    bw  = obj["largura"]
+    ah  = obj["altura"]
+    qtd = obj["qtd"]
+    paso = bw // qtd
+    for i in range(qtd):
+        px  = bx + i * paso + paso // 2
+        lrg = max(4, paso // 2 - 1)
+        pygame.draw.polygon(tela, (200, 40, 40),
+            [(px - lrg, CHAO_Y), (px + lrg, CHAO_Y), (px, CHAO_Y - ah)])
+        pygame.draw.polygon(tela, (255, 110, 110),
+            [(px - lrg//2, CHAO_Y - 5), (px + lrg//2, CHAO_Y - 5), (px, CHAO_Y - ah + 6)])
+
+def desenhar_barreira(obj):
+    bx = int(obj["x"])
+    by = CHAO_Y - obj["altura"]
+    bw = obj["largura"]
+    bh = obj["altura"]
+    pygame.draw.rect(tela, (160, 85, 20), (bx, by, bw, bh), border_radius=4)
+    pygame.draw.rect(tela, (210, 130, 45), (bx, by, bw, bh), 2, border_radius=4)
+    for i in range(3):
+        pygame.draw.line(tela, (120, 60, 8),
+            (bx + 4, by + i * 23 + 10), (bx + bw - 4, by + i * 23 + 10), 2)
+
+def desenhar_personagem_roll(cx, cy, frame, invinc, piscar):
+    if invinc > 0 and piscar % 2 == 0:
+        return
+    r = 18
+    cx_r = cx + int(math.cos(frame * 0.4) * 4)
+    pygame.draw.ellipse(tela, (50, 100, 200), (cx_r - r - 6, cy - r * 2 + 8, (r + 6) * 2, r * 2), border_radius=r)
+    pygame.draw.ellipse(tela, (80, 140, 255), (cx_r - r - 4, cy - r * 2 + 10, (r + 4) * 2, r * 2 - 4), border_radius=r)
+    pygame.draw.circle(tela, (255, 200, 150), (cx_r, cy - r * 2 + r), r - 2)
+    pygame.draw.circle(tela, BRANCO, (cx_r + 5, cy - r * 2 + r - 3), 5)
+    pygame.draw.circle(tela, PRETO,  (cx_r + 6, cy - r * 2 + r - 3), 3)
+
 def jogar(indice_fase, pontos_antes):
     nome_fase  = FASES[indice_fase][0]
-    velocidade = FASES[indice_fase][1]
     zona_alvo  = FASES[indice_fase][2]
 
-    jog_x       = 150.0
-    jog_y       = float(CHAO_Y)
-    jog_vy      = 0.0
-    jog_no_chao = True
-    jog_no_obst = False
-    jog_vidas   = 5
-    jog_invinc  = 0
-    jog_piscar  = 0
-    jog_frame   = 0
+    VEL_ANDAR  = 4
+    VEL_CORRER = 7
+    VEL_ROLL   = 9
+    GRAVIDADE  = 0.78
+
+    jog_x      = 200.0
+    jog_y      = float(CHAO_Y)
+    jog_vy     = 0.0
+    jog_chao   = True
+    jog_vidas  = 5
+    jog_invinc = 0
+    jog_piscar = 0
+    jog_frame  = 0
+    rolando    = False
+    roll_timer = 0
+    roll_cd    = 0
 
     pontos      = pontos_antes
     pontos_fase = 0
 
-    obstaculos   = []
+    obstaculos    = []
     moedas_livres = []
-    offset       = 0.0
-    proximo_x    = LARGURA + 250
-    parts        = []
+    armadilhas    = []
+    offset        = 0.0
+    mundo_x       = 0.0
+    proximo_mundo = LARGURA + 500
+    proximo_arm   = LARGURA + 400
+    parts         = []
+    pausado       = False
 
-    pausado     = False
+    iniciar_musica()
 
     while True:
         relogio.tick(60)
-
         RECT_PAUSE = pygame.Rect(LARGURA - 90, 8, 80, 34)
 
         for ev in pygame.event.get():
             if ev.type == pygame.QUIT:
-                pygame.quit()
-                sys.exit()
+                parar_musica(); pygame.quit(); sys.exit()
             if ev.type == pygame.KEYDOWN:
                 if ev.key == pygame.K_ESCAPE:
-                    return pontos, None
+                    parar_musica(); return pontos, None
                 if ev.key == pygame.K_p:
                     pausado = not pausado
                 if not pausado:
                     if ev.key in (pygame.K_SPACE, pygame.K_UP, pygame.K_w):
-                        if jog_no_chao or jog_no_obst:
-                            jog_vy      = -15
-                            jog_no_chao = False
-                            jog_no_obst = False
-                            tocar(SOM_PULO)
+                        if jog_chao and not rolando:
+                            jog_vy    = -17
+                            jog_chao  = False
+                    if ev.key in (pygame.K_DOWN, pygame.K_s) and jog_chao and roll_cd == 0:
+                        rolando    = True
+                        roll_timer = 35
+                        roll_cd    = 80
             if ev.type == pygame.MOUSEBUTTONDOWN:
                 mx, my = pygame.mouse.get_pos()
                 if RECT_PAUSE.collidepoint(mx, my):
                     pausado = not pausado
                 if pausado:
-                    RECT_CONT = pygame.Rect(LARGURA//2 - 110, ALTURA//2 + 50, 220, 48)
-                    if RECT_CONT.collidepoint(mx, my):
+                    RC = pygame.Rect(LARGURA//2 - 110, ALTURA//2 + 50, 220, 48)
+                    if RC.collidepoint(mx, my):
                         pausado = False
 
         if pausado:
-            painel_p = pygame.Surface((LARGURA, ALTURA), pygame.SRCALPHA)
-            pygame.draw.rect(painel_p, (0, 0, 0, 150), (0, 0, LARGURA, ALTURA))
-            tela.blit(painel_p, (0, 0))
-            tp1 = fonte_grande.render("II  PAUSADO", True, AMARELO)
-            tela.blit(tp1, (LARGURA//2 - tp1.get_width()//2, ALTURA//2 - 60))
-            tp2 = fonte_media.render("Pressione P ou clique abaixo", True, CINZA)
-            tela.blit(tp2, (LARGURA//2 - tp2.get_width()//2, ALTURA//2 - 10))
-            RECT_CONT = pygame.Rect(LARGURA//2 - 110, ALTURA//2 + 50, 220, 48)
-            pygame.draw.rect(tela, (40, 160, 60), RECT_CONT, border_radius=12)
-            pygame.draw.rect(tela, VERDE,         RECT_CONT, 2, border_radius=12)
-            sc = fonte_media.render("▶  CONTINUAR", True, BRANCO)
-            tela.blit(sc, (LARGURA//2 - sc.get_width()//2, RECT_CONT.y + 10))
+            s = pygame.Surface((LARGURA, ALTURA), pygame.SRCALPHA)
+            pygame.draw.rect(s, (0, 0, 0, 150), (0, 0, LARGURA, ALTURA))
+            tela.blit(s, (0, 0))
+            tp = fonte_grande.render("II PAUSADO", True, AMARELO)
+            tela.blit(tp, (LARGURA//2 - tp.get_width()//2, ALTURA//2 - 50))
+            RC = pygame.Rect(LARGURA//2 - 110, ALTURA//2 + 50, 220, 48)
+            pygame.draw.rect(tela, (40, 160, 60), RC, border_radius=12)
+            sc = fonte_media.render("CONTINUAR", True, BRANCO)
+            tela.blit(sc, (LARGURA//2 - sc.get_width()//2, RC.y + 10))
             pygame.display.flip()
             continue
 
-        jog_vy += 0.75
-        jog_y  += jog_vy
-        jog_no_chao = False
-        jog_no_obst = False
+        teclas = pygame.key.get_pressed()
+
+        movendo_dir = teclas[pygame.K_RIGHT] or teclas[pygame.K_d]
+        movendo_esq = teclas[pygame.K_LEFT]  or teclas[pygame.K_a]
+        correndo    = teclas[pygame.K_LSHIFT]
+
+        if rolando:
+            vel_h = VEL_ROLL
+        elif correndo:
+            vel_h = VEL_CORRER
+        else:
+            vel_h = VEL_ANDAR
+
+        scroll = 0.0
+        if movendo_dir:
+            if jog_x < LARGURA * 0.45:
+                jog_x = min(LARGURA * 0.45, jog_x + vel_h)
+            else:
+                scroll = vel_h
+        if movendo_esq:
+            jog_x = max(50, jog_x - vel_h)
+
+        if roll_timer > 0:
+            roll_timer -= 1
+        else:
+            rolando = False
+        if roll_cd > 0:
+            roll_cd -= 1
+
+        jog_vy  += GRAVIDADE
+        jog_y   += jog_vy
+        jog_chao = False
 
         if jog_y >= CHAO_Y:
-            jog_y       = float(CHAO_Y)
-            jog_vy      = 0
-            jog_no_chao = True
+            jog_y    = float(CHAO_Y)
+            jog_vy   = 0
+            jog_chao = True
 
         if jog_invinc > 0:
             jog_invinc -= 1
-
         jog_piscar = (jog_piscar + 1) % 6
         jog_frame  = (jog_frame  + 1) % 24
 
-        offset    += velocidade
-        proximo_x -= velocidade
+        if scroll > 0:
+            offset     += scroll
+            mundo_x    += scroll
+            proximo_mundo -= scroll
+            proximo_arm   -= scroll
+            for ob  in obstaculos:  mover_obstaculo(ob, scroll)
+            for arm in armadilhas:  arm["x"] -= scroll
+            for m   in moedas_livres: m["x"] -= scroll
 
-        if len(obstaculos) == 0 or obstaculos[-1]["cx"] < LARGURA + 100:
-            if proximo_x < LARGURA + 200:
-                novo = criar_obstaculo(proximo_x + LARGURA, zona_alvo)
-                obstaculos.append(novo)
-                proximo_x = LARGURA + random.randint(800, 1100)
+        if proximo_mundo < LARGURA + 200:
+            novo = criar_obstaculo(float(LARGURA + 300), zona_alvo)
+            obstaculos.append(novo)
+            proximo_mundo = LARGURA + random.randint(1400, 1900)
 
-        for ob in obstaculos:
-            mover_obstaculo(ob, velocidade)
+        if proximo_arm < LARGURA + 150:
+            escolha = random.choices(
+                ["peq", "med", "med", "grd", "barreira"],
+                weights=[2, 3, 3, 1, 2])[0]
+            ax = float(LARGURA + random.randint(40, 180))
+            if escolha == "peq":
+                armadilhas.append(criar_espinho(ax, "pequeno"))
+            elif escolha == "grd":
+                armadilhas.append(criar_espinho(ax, "grande"))
+            elif escolha == "barreira":
+                armadilhas.append(criar_barreira(ax))
+            else:
+                armadilhas.append(criar_espinho(ax, "medio"))
+            proximo_arm = LARGURA + random.randint(300, 550)
 
         for ob in obstaculos:
             if obstaculo_fora(ob):
@@ -708,144 +874,103 @@ def jogar(indice_fase, pontos_antes):
                     if not m["coletado"]:
                         moedas_livres.append(m)
 
-        obstaculos = [ob for ob in obstaculos if not obstaculo_fora(ob)]
+        obstaculos    = [ob  for ob  in obstaculos  if not obstaculo_fora(ob)]
+        armadilhas    = [arm for arm in armadilhas  if arm["x"] > -100]
+        moedas_livres = [m   for m   in moedas_livres if m["x"] > -80]
 
-        for m in moedas_livres:
-            m["x"]      -= velocidade
-            m["flutua"] += 0.07
+        jog_cx  = int(jog_x)
+        jog_cy  = int(jog_y)
+        alt_hit = 22 if rolando else 46
 
-        moedas_livres = [m for m in moedas_livres if m["x"] > -60]
-
-        jog_cx = int(jog_x)
-        jog_cy = int(jog_y)
-
-        for ob in obstaculos:
-            raio  = ob["raio"]
-            cx_a  = ob["cx_a"]
-            cx_b  = ob["cx_b"]
-            cy_ob = ob["cy"]
-
-            topo_a = topo_circulo_em_x(jog_cx, cx_a, cy_ob, raio)
-            topo_b = topo_circulo_em_x(jog_cx, cx_b, cy_ob, raio)
-            topo   = None
-            if topo_a is not None and topo_b is not None:
-                topo = min(topo_a, topo_b)
-            elif topo_a is not None:
-                topo = topo_a
-            elif topo_b is not None:
-                topo = topo_b
-
-            pousando = False
-            if topo is not None:
-                if jog_vy >= 0 and (jog_y - jog_vy) <= topo + 5 and jog_y >= topo - 5:
-                    jog_y       = topo
-                    jog_vy      = 0
-                    jog_no_obst = True
-                    pousando    = True
-
-            meio_y   = jog_cy - 22
-            dentro_a = ponto_dentro_circulo(jog_cx, meio_y, cx_a, cy_ob, raio)
-            dentro_b = ponto_dentro_circulo(jog_cx, meio_y, cx_b, cy_ob, raio)
-
-            borda_esq = cx_a - raio
-            if borda_esq < jog_cx + 28 and not pousando and not jog_no_obst:
-                delta = (jog_cx + 28) - borda_esq
-                ob["cx"]   += delta
-                ob["cx_a"] += delta
-                ob["cx_b"] += delta
-                for m in ob["moedas"]:
-                    m["x"] += delta
-
-            for m in ob["moedas"]:
-                if m["coletado"]:
-                    continue
-                ey_m = m["y"] + int(math.sin(m["flutua"]) * 6)
-                dist = math.sqrt((jog_cx - m["x"]) ** 2 + (jog_cy - 30 - ey_m) ** 2)
-                if dist < 34:
-                    m["coletado"] = True
-                    if m["correto"]:
-                        pontos      += 10
-                        pontos_fase += 1
-                        tocar(SOM_MOEDA)
-                        for k in range(18):
-                            parts.append([float(m["x"]), float(ey_m),
-                                          random.uniform(-3, 3), random.uniform(-5, -1),
-                                          random.randint(18, 32), (255, 215, 30)])
-                    else:
-                        jog_vidas  -= 1
-                        jog_invinc  = 70
-                        tocar(SOM_DANO)
-                        for k in range(14):
-                            parts.append([float(m["x"]), float(ey_m),
-                                          random.uniform(-3, 3), random.uniform(-5, -1),
-                                          random.randint(18, 32), (210, 60, 60)])
-        for m in moedas_livres:
-            if m["coletado"]:
+        for arm in armadilhas:
+            ax = int(arm["x"])
+            aw = arm["largura"]
+            ah = arm["altura"]
+            if rolando and arm["tipo"] == "espinho" and arm["tam"] == "pequeno":
                 continue
-            ey_m = m["y"] + int(math.sin(m["flutua"]) * 6)
-            dist = math.sqrt((jog_cx - m["x"]) ** 2 + (jog_cy - 30 - ey_m) ** 2)
+            if (jog_cx + 14 > ax and jog_cx - 14 < ax + aw and
+                    jog_cy > CHAO_Y - ah and jog_invinc == 0):
+                jog_vidas -= 1
+                jog_invinc = 80
+                for k in range(18):
+                    parts.append([float(jog_cx), float(jog_cy - 20),
+                                  random.uniform(-4, 4), random.uniform(-7, -1),
+                                  random.randint(18, 32), (255, 80, 80)])
+
+        def coletar(m):
+            nonlocal pontos, pontos_fase, jog_vidas, jog_invinc
+            dist = math.sqrt((jog_cx - m["x"])**2 + (jog_cy - 30 - m["y"])**2)
             if dist < 34:
                 m["coletado"] = True
                 if m["correto"]:
-                    pontos      += 10
-                    pontos_fase += 1
-                    tocar(SOM_MOEDA)
+                    pontos += 10; pontos_fase += 1; tocar_moeda()
                     for k in range(18):
-                        parts.append([float(m["x"]), float(ey_m),
+                        parts.append([float(m["x"]), float(m["y"]),
                                       random.uniform(-3, 3), random.uniform(-5, -1),
                                       random.randint(18, 32), (255, 215, 30)])
                 else:
-                        jog_vidas  -= 1
-                        jog_invinc  = 70
-                        tocar(SOM_DANO)
-                        for k in range(14):
-                            parts.append([float(m["x"]), float(ey_m),
-                                          random.uniform(-3, 3), random.uniform(-5, -1),
-                                          random.randint(18, 32), (210, 60, 60)])
+                    jog_vidas -= 1; jog_invinc = 70
+                    for k in range(14):
+                        parts.append([float(m["x"]), float(m["y"]),
+                                      random.uniform(-3, 3), random.uniform(-5, -1),
+                                      random.randint(18, 32), (210, 60, 60)])
+
+        for ob in obstaculos:
+            for m in ob["moedas"]:
+                if not m["coletado"]: coletar(m)
+        for m in moedas_livres:
+            if not m["coletado"]: coletar(m)
 
         novas_parts = []
         for p in parts:
-            p[0] += p[2]
-            p[1] += p[3]
-            p[3] += 0.22
-            p[4] -= 1
-            if p[4] > 0:
-                novas_parts.append(p)
+            p[0]+=p[2]; p[1]+=p[3]; p[3]+=0.22; p[4]-=1
+            if p[4] > 0: novas_parts.append(p)
         parts = novas_parts
 
         desenhar_fundo(offset)
 
+        for arm in armadilhas:
+            if arm["tipo"] == "espinho": desenhar_espinho(arm)
+            else: desenhar_barreira(arm)
+
         for ob in obstaculos:
             desenhar_obstaculo(ob)
-            for m in ob["moedas"]:
-                desenhar_moeda(m)
-
-        for m in moedas_livres:
-            desenhar_moeda(m)
+            for m in ob["moedas"]: desenhar_moeda(m)
+        for m in moedas_livres: desenhar_moeda(m)
 
         for p in parts:
-            a = max(0, int(255 * p[4] / 36))
+            a = max(0, int(255 * p[4] / 34))
             s = pygame.Surface((8, 8), pygame.SRCALPHA)
             pygame.draw.circle(s, (*p[5], a), (4, 4), 4)
-            tela.blit(s, (int(p[0]) - 4, int(p[1]) - 4))
+            tela.blit(s, (int(p[0])-4, int(p[1])-4))
 
-        desenhar_personagem(jog_cx, int(jog_y), jog_frame,
-                            jog_no_chao or jog_no_obst,
-                            jog_invinc, jog_piscar)
+        if rolando:
+            desenhar_personagem_roll(jog_cx, jog_cy, jog_frame, jog_invinc, jog_piscar)
+        else:
+            desenhar_personagem(jog_cx, jog_cy, jog_frame, jog_chao, jog_invinc, jog_piscar)
 
         desenhar_hud(jog_vidas, pontos_fase, nome_fase, zona_alvo, pontos)
+
+        ctrl = fonte_mini.render(
+            "← → Mover  |  SHIFT Correr  |  ↑ Pular  |  ↓ Rolar  |  P Pausa",
+            True, (120, 120, 165))
+        tela.blit(ctrl, (LARGURA//2 - ctrl.get_width()//2, ALTURA - 20))
+
+        roll_txt = "ROLAR: PRONTO!" if roll_cd == 0 else ("ROLAR: " + str(roll_cd//10) + "s")
+        cor_r    = (100, 255, 150) if roll_cd == 0 else (160, 160, 200)
+        tr = fonte_mini.render(roll_txt, True, cor_r)
+        tela.blit(tr, (12, 56))
 
         pygame.display.flip()
 
         if pontos_fase >= PONTOS_PARA_PASSAR:
-            tocar(SOM_FASE)
+            parar_musica()
+            tocar_vitoria()
             return pontos, indice_fase
 
         if jog_vidas <= 0:
-            tocar(SOM_GAME)
+            parar_musica()
             return pontos, None
-
-    return pontos, None
 
 
 while True:
